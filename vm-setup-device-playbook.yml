@@ -1,0 +1,122 @@
+- hosts: f36-ee-edgedevice
+  become: true
+  
+  tasks:
+    - name: Enable copr of flotta project
+      community.general.copr:
+        host: copr.fedorainfracloud.org
+        state: enabled
+        name: project-flotta/flotta
+    
+
+    - name: Install all the required packages
+      dnf:
+       name: '{{ item }}'
+       state: present
+       update_cache: True
+      with_items:
+      - podman
+      - nftables
+      - node_exporter
+      - git
+      - make
+      - curl 
+
+    - name: Install developer packages
+      dnf:
+        name: '{{ item }}'
+        state: present
+        update_cache: True
+      with_items:
+        vim
+    - name: Install Go 1.16.15    
+      shell: |
+        curl -LO https://go.dev/dl/go1.16.15.linux-amd64.tar.gz
+        sudo rm -rf /usr/local/go 
+        sudo tar -C /usr/local -xzf go1.16.15.linux-amd64.tar.gz
+
+- hosts: f36-ee-edgedevice
+  vars_prompt:
+    - name: username
+      prompt: What is your username?
+      private: no
+
+  tasks:
+  - name: Export go path    
+    shell: export PATH=$PATH:/usr/local/go/:/usr/local/go/bin:/home/{{username}}/go/bin
+
+  - name: Easy workaround to install Go for root
+    become: true
+    shell: sudo cp -r /usr/local/go/bin/go /usr/local/bin/
+  
+  - name: Export go path for root    
+    become: true
+    shell: export PATH=$PATH:/usr/local/go/bin
+
+  - name: Create repos dir if not exist in user home 
+    ansible.builtin.file:
+      path: /home/{{username}}/repos
+      state: directory
+
+  - name: Check if flotta repo already exists
+    stat:
+      path: /home/{{username}}/repos/flotta-device-worker
+    register: device_folder
+
+  - name: Git checkout flotta device repo already exists
+    debug: 
+      msg: "flotta device already cloned"
+    when: (device_folder.stat.exists) and (device_folder.stat.isdir)
+
+  - name: Git checkout flotta device repo
+    git:
+      repo: "https://github.com/project-flotta/flotta-device-worker.git"
+      dest: /home/{{username}}/repos/flotta-device-worker
+    when: (device_folder.stat.isdir is undefined) or (not device_folder.stat.isdir) or (not device_folder.stat.exists)
+
+  - name: Git checkout flotta device repo already exists
+    debug: 
+      msg: "flotta device already cloned"
+    when: device_folder.stat.exists
+
+  - name: Check if yggdrasil repo already exists
+    stat:
+      path: /home/{{username}}/repos/yggdrasil
+    register: yggdrasil_folder
+
+  - name: Git checkout yggdrasil repo already exists
+    debug: 
+      msg: "yggdrasil repo already cloned STAT: {{yggdrasil_folder.stat}}" 
+    when: yggdrasil_folder.stat.exists
+
+  - name: Git checkout yggdrasil repo
+    git:
+      repo: "https://github.com/RedHatInsights/yggdrasil.git"
+      dest: /home/{{username}}/repos/yggdrasil
+    when: (yggdrasil_folder.stat.isdir is undefined) or (not yggdrasil_folder.stat.isdir) or (not yggdrasil_folder.stat.exists)
+  
+  ## TODO: update git projects if already exist
+
+  - name: Install gojsonschema
+    shell: go get github.com/atombender/go-jsonschema/cmd/gojsonschema
+
+  - name: Easy workaround to install gojsonschema for root
+    become: true
+    shell: sudo cp /home/{{username}}/go/bin/gojsonschema /usr/local/bin/
+
+  - name: Install yggdrasil
+    shell: |
+      export MAKE_FLAGS="PREFIX=/usr SYSCONFDIR=/etc LOCALSTATEDIR=/var" 
+      cd /home/{{username}}/repos/yggdrasil
+      make ${MAKE_FLAGS}
+      sudo make ${MAKE_FLAGS} install
+      cd /home/{{username}}
+
+  - name: run go mod
+    shell: |
+      cd flotta-device-worker
+      go mod
+      cd ..
+
+  - name: run make install
+    shell: sudo --preserve-env=XDG_RUNTIME_DIR,HOME,USER make install
