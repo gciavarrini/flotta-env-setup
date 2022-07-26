@@ -1,0 +1,31 @@
+---
+- hosts: f36-ee,f36-ee-edgedevice
+  become: true
+  vars_prompt:
+    - name: username
+      prompt: What's your username?
+      private: no
+    - name: "user_password"    
+      prompt: "Enter a password for the user"    
+      private: yes    
+      encrypt: "sha512_crypt"
+      confirm: yes    
+      salt_size: 7
+  tasks:
+  - name: Create group
+    group:
+      name: libvirt
+      state: present
+  
+  - name: Create a login user
+    user:
+      name: "{{username}}"
+      password: "{{user_password}}"
+      groups:
+        - wheel
+        - libvirt
+      state: present
+      shell: /bin/bash
+      system: no       
+      createhome: yes
+
